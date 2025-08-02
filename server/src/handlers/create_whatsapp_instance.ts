@@ -1,23 +1,51 @@
 
+import { db } from '../db';
+import { whatsappInstancesTable, usersTable } from '../db/schema';
 import { type CreateInstanceInput, type WhatsAppInstance } from '../schema';
+import { eq } from 'drizzle-orm';
+import { randomBytes } from 'crypto';
 
 export async function createWhatsAppInstance(input: CreateInstanceInput, userId: number): Promise<WhatsAppInstance> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is creating a new WhatsApp instance for a user,
-    // generating API key, and initiating container deployment.
-    return Promise.resolve({
-        id: 0, // Placeholder ID
+  try {
+    // Verify user exists
+    const users = await db.select()
+      .from(usersTable)
+      .where(eq(usersTable.id, userId))
+      .execute();
+
+    if (users.length === 0) {
+      throw new Error('User not found');
+    }
+
+    // Generate API key
+    const apiKey = randomBytes(32).toString('hex');
+
+    // Insert WhatsApp instance record
+    const result = await db.insert(whatsappInstancesTable)
+      .values({
         user_id: userId,
         instance_name: input.instance_name,
-        status: 'creating' as const,
+        status: 'creating',
+        api_key: apiKey,
         qr_code: null,
         phone_number: null,
         webhook_url: null,
         webhook_events: null,
-        api_key: 'generated_api_key_placeholder',
         container_id: null,
-        last_seen: null,
-        created_at: new Date(),
-        updated_at: new Date()
-    } as WhatsAppInstance);
+        last_seen: null
+      })
+      .returning()
+      .execute();
+
+    const instance = result[0];
+
+    // Convert webhook_events from unknown to string[] | null for type compatibility
+    return {
+      ...instance,
+      webhook_events: instance.webhook_events as string[] | null
+    };
+  } catch (error) {
+    console.error('WhatsApp instance creation failed:', error);
+    throw error;
+  }
 }

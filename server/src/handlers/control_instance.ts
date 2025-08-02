@@ -1,23 +1,67 @@
 
+import { db } from '../db';
+import { whatsappInstancesTable } from '../db/schema';
 import { type InstanceControlInput, type WhatsAppInstance } from '../schema';
+import { eq, and } from 'drizzle-orm';
 
 export async function controlInstance(input: InstanceControlInput, userId: number): Promise<WhatsAppInstance> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is controlling (start/stop/restart) the user's WhatsApp instance container.
-    // Should update instance status and manage Docker container lifecycle.
-    return Promise.resolve({
-        id: input.instance_id,
-        user_id: userId,
-        instance_name: 'placeholder',
-        status: input.action === 'start' ? 'starting' : 'stopped' as const,
-        qr_code: null,
-        phone_number: null,
-        webhook_url: null,
-        webhook_events: null,
-        api_key: 'api_key_placeholder',
-        container_id: 'container_placeholder',
-        last_seen: new Date(),
-        created_at: new Date(),
+  try {
+    // First, verify the instance exists and belongs to the user
+    const existingInstances = await db.select()
+      .from(whatsappInstancesTable)
+      .where(and(
+        eq(whatsappInstancesTable.id, input.instance_id),
+        eq(whatsappInstancesTable.user_id, userId)
+      ))
+      .execute();
+
+    if (existingInstances.length === 0) {
+      throw new Error('Instance not found or access denied');
+    }
+
+    const existingInstance = existingInstances[0];
+
+    // Determine the new status based on the action
+    let newStatus: 'starting' | 'stopped' | 'creating';
+    switch (input.action) {
+      case 'start':
+        if (existingInstance.status === 'running') {
+          throw new Error('Instance is already running');
+        }
+        newStatus = 'starting';
+        break;
+      case 'stop':
+        if (existingInstance.status === 'stopped') {
+          throw new Error('Instance is already stopped');
+        }
+        newStatus = 'stopped';
+        break;
+      case 'restart':
+        newStatus = 'starting';
+        break;
+      default:
+        throw new Error('Invalid action');
+    }
+
+    // Update the instance status and updated_at timestamp
+    const updatedInstances = await db.update(whatsappInstancesTable)
+      .set({
+        status: newStatus,
         updated_at: new Date()
-    } as WhatsAppInstance);
+      })
+      .where(eq(whatsappInstancesTable.id, input.instance_id))
+      .returning()
+      .execute();
+
+    const updatedInstance = updatedInstances[0];
+
+    // Convert the database result to match the schema type
+    return {
+      ...updatedInstance,
+      webhook_events: updatedInstance.webhook_events as string[] | null
+    };
+  } catch (error) {
+    console.error('Instance control failed:', error);
+    throw error;
+  }
 }
